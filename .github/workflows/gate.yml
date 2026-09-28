@@ -1,0 +1,22 @@
+name: GHA Security Gate (test)
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report context
+        run: |
+          echo "source_workflow_repo = ${{ github.repository }}"
+          echo "event                = ${{ github.event_name }}"
+          echo "visibility           = ${{ github.event.repository.visibility }}"
+          echo "ref                  = ${{ github.ref }}"
+          echo "GATE OK"
