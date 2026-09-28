@@ -19,4 +19,5 @@ jobs:
           echo "event                = ${{ github.event_name }}"
           echo "visibility           = ${{ github.event.repository.visibility }}"
           echo "ref                  = ${{ github.ref }}"
-          echo "GATE OK"
+          echo "GATE FAIL (simulated finding)"
+          exit 1
