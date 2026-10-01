@@ -1,0 +1,94 @@
+# エンジンの配送口（composite action）。
+#
+# 差分 #1 への答えがここにある。判定コードは **この action が置かれている
+# リポジトリ（= source repo）の固定 ref から来る**。`${{ github.action_path }}` が
+# 指すのは checkout された action 自身であって、対象リポジトリの作業ツリーではない。
+# 対象リポジトリのファイルは `root` の下に「解析対象」としてしか現れない。
+#
+# サンプル実装は `python3 .github/zizmor-gate.py` を対象 repo から読んでいた。
+# あの形では PR 作者が判定そのものを書き換えられる。
+#
+# T1 の成果物としてはここまで。ruleset / entry workflow / reusable workflow への
+# 接続は T2 の担当で、この action はまだどこからも呼ばれていない。
+name: gha-security-gate
+description: GitHub Actions セキュリティゲート — 判定エンジン
+inputs:
+  phase:
+    description: "off=判定しない / notice=判定するが落とさない / error=検出で落とす"
+    required: false
+    default: notice
+  visibility:
+    description: "対象リポジトリの可視性。public では出力を rule 名と指紋だけにする"
+    required: false
+    default: public
+  root:
+    description: "解析対象のディレクトリ"
+    required: false
+    default: "."
+  changed-files:
+    description: "PR の変更ファイル一覧のパス（1 行 1 パス）。空なら全件"
+    required: false
+    default: ""
+  format:
+    description: "actions / text / sarif"
+    required: false
+    default: actions
+  on-engine-error:
+    description: "エンジンが壊れたときに落とすか（fail / pass）"
+    required: false
+    default: fail
+  no-ignores:
+    description: "repo 側の ignore を無効化する（定期スキャン用。PR ゲートでは false）"
+    required: false
+    default: "false"
+  findings-path:
+    description: "findings JSON の出力先"
+    required: false
+    default: gha-gate-findings.json
+  python-version:
+    description: "エンジンを動かす Python"
+    required: false
+    default: "3.14"
+outputs:
+  findings:
+    description: "findings JSON のパス"
+    value: ${{ inputs.findings-path }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install engine dependencies
+      shell: bash
+      run: pip install --no-input -r "$GITHUB_ACTION_PATH/requirements.txt"
+
+    - name: Scan
+      shell: bash
+      env:
+        GATE_ROOT: ${{ inputs.root }}
+        GATE_PHASE: ${{ inputs.phase }}
+        GATE_VISIBILITY: ${{ inputs.visibility }}
+        GATE_CHANGED: ${{ inputs.changed-files }}
+        GATE_OUT: ${{ inputs.findings-path }}
+        GATE_NO_IGNORES: ${{ inputs.no-ignores }}
+      run: |
+        set -euo pipefail
+        args=(--root "$GATE_ROOT" --phase "$GATE_PHASE"
+              --visibility "$GATE_VISIBILITY" --out "$GATE_OUT")
+        if [ -n "$GATE_CHANGED" ]; then args+=(--changed-files "$GATE_CHANGED"); fi
+        if [ "$GATE_NO_IGNORES" = "true" ]; then args+=(--no-ignores --no-config); fi
+        # 判定コードは source repo の固定 ref から。対象 repo からは読まない
+        PYTHONPATH="$GITHUB_ACTION_PATH/src" python -m gha_gate scan "${args[@]}"
+
+    - name: Render
+      shell: bash
+      env:
+        GATE_OUT: ${{ inputs.findings-path }}
+        GATE_FORMAT: ${{ inputs.format }}
+        GATE_ON_ERROR: ${{ inputs.on-engine-error }}
+      run: |
+        set -euo pipefail
+        PYTHONPATH="$GITHUB_ACTION_PATH/src" python -m gha_gate render \
+          --input "$GATE_OUT" --format "$GATE_FORMAT" --on-engine-error "$GATE_ON_ERROR"
