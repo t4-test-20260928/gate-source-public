@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: gha-gate
+Version: 0.1.0
+Summary: tier4 GitHub Actions セキュリティゲート — 判定エンジン
+Requires-Python: >=3.11
+Requires-Dist: PyYAML>=6.0
