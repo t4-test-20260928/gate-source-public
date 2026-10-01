@@ -1,3 +1,13 @@
+# GHA セキュリティゲートの entry workflow。
+#
+# この定義は Organization ruleset の required workflow として **public な**対象リポジトリへ配送される。
+# private / internal 向けは gate-source（private）側にある。private source → public target は
+# GitHub の仕様で不可なので、public 用に source repo を分けている。
+# 走る場所は対象リポジトリの文脈だが、**ファイルの中身は source repo の固定 ref の版**が使われる。
+#
+# 判定エンジンは `uses: t4-test-20260928/gate-source/gate@<sha>` で参照する。
+# ここを `uses: ./gate` にしてはいけない。相対参照は「対象リポジトリの checkout」を指すので、
+# PR 作者が判定コードそのものを差し替えられる。サンプル実装が抱えていた問題そのもの。
 name: GHA Security Gate (test)
 
 on:
@@ -11,7 +21,7 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Report context
         run: |
@@ -19,4 +29,65 @@ jobs:
           echo "event                = ${{ github.event_name }}"
           echo "visibility           = ${{ github.event.repository.visibility }}"
           echo "ref                  = ${{ github.ref }}"
-          echo "GATE OK"
+
+      # DEL-11: 対象リポジトリの custom property から phase を決める。
+      # property が entry workflow から読めることは V3（2026-09-30）で実測済み。
+      # 対応は DEL-10: 0=off / 1=notice / 2=error。
+      - name: Resolve phase from repository property
+        id: phase
+        env:
+          CUSTOM_PROPERTIES: ${{ toJSON(github.event.repository.custom_properties) }}
+        run: |
+          set -euo pipefail
+          echo "custom_properties = ${CUSTOM_PROPERTIES}"
+          value="$(jq -r '."sec-inc-85-gha-gate-phase" // empty' <<<"${CUSTOM_PROPERTIES}")"
+          case "${value}" in
+            0) phase=off    ;;
+            1) phase=notice ;;
+            2) phase=error  ;;
+            "")
+              # 値なし＝ruleset の対象外。ここに来るのは source repo が自分自身を
+              # 判定するときだけ（DEL-13）
+              phase=notice
+              echo "::notice::property が無いので notice で判定する（source repo の自己判定）"
+              ;;
+            *)
+              # 未割当の値。判定を止めるのではなく、落とさない側に倒して気づけるようにする
+              phase=notice
+              echo "::warning::未割当の phase 値 '${value}' — notice として扱う（DEL-13）"
+              ;;
+          esac
+          echo "property=${value:-（値なし）}"
+          echo "phase=${phase}"
+          echo "phase=${phase}" >> "$GITHUB_OUTPUT"
+
+      # 対象リポジトリの作業ツリー。ここは「解析対象」であって、判定コードではない
+      - name: Checkout target repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # 変更ファイル限定スコープ（cli-contract §6）。merge_group には PR 番号が無いので全件になる
+      - name: Collect changed files
+        id: changed
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/changed.txt"
+          gh api "/repos/${REPO}/pulls/${PR}/files" --paginate --jq '.[].filename' > "$out"
+          echo "path=${out}" >> "$GITHUB_OUTPUT"
+          echo "変更ファイル $(wc -l < "$out") 件"
+
+      - name: Gate
+        uses: t4-test-20260928/gate-source-public/gate@63fa3cf78898c08d23ccafe06b98476c40f476c0
+        with:
+          phase: ${{ steps.phase.outputs.phase }}
+          visibility: ${{ github.event.repository.visibility }}
+          root: .
+          changed-files: ${{ steps.changed.outputs.path }}
+          format: actions
+          on-engine-error: fail
