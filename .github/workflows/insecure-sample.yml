@@ -13,6 +13,7 @@
 #
 # `if: false` は使っていません。zizmor は `if: false` の job の中を監査しないため、
 # 付けると検出自体が消えて fixture の役に立ちません（2026-10-01 実測）。
+# V7: public repo での出力マスク（OUT-01）を確認するため、この PR でこのファイルを変更スコープに載せる。
 name: Insecure sample (INTENTIONAL TEST FIXTURE — never runs)
 
 on:
