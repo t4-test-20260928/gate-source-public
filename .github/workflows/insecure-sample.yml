@@ -1,0 +1,40 @@
+# ⚠⚠ これは「わざと脆弱に書いた」サンプルです。真似しないでください。 ⚠⚠
+#
+# THIS WORKFLOW IS INTENTIONALLY INSECURE. IT IS A TEST FIXTURE. DO NOT COPY.
+#
+# GitHub Actions のセキュリティゲート（静的検査）が、既知のアンチパターンを
+# 検出して Code Scanning のアラートに変換できるかを確かめるためだけに置いています。
+# ここで使っているパターンは CodeQL / zizmor が公開ドキュメントで説明しているものです。
+#
+# 実行されないようにしてあります（三重）:
+#   1. このリポジトリは Actions が無効（enabled=false）
+#   2. `branches:` が実在しないブランチ名なので、どの PR でも発火しない
+#   3. job は echo だけ。checkout したコードを実行せず、permissions も contents: read のみ
+#
+# `if: false` は使っていません。zizmor は `if: false` の job の中を監査しないため、
+# 付けると検出自体が消えて fixture の役に立ちません（2026-10-01 実測）。
+name: Insecure sample (INTENTIONAL TEST FIXTURE — never runs)
+
+on:
+  pull_request_target:
+    # 実在しないブランチ。これにより発火しない
+    branches: ['__gha-gate-fixture-never__']
+
+permissions:
+  contents: read
+
+jobs:
+  # 特権 trigger で PR 側のコードを checkout している（CodeQL: untrusted-checkout）
+  checkout-pr-head:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - run: echo "inert"
+
+  # $GITHUB_ENV への注入（zizmor: github-env / template-injection）
+  write-github-env:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "TITLE=${{ github.event.pull_request.title }}" >> "$GITHUB_ENV"
